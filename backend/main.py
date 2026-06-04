@@ -32,11 +32,9 @@ REFUSAL_PHRASES = [
     "i'd be happy to help with other", "instead, i can",
 ]
 
-
 def load_attacks() -> list[dict]:
     with open(ATTACKS_FILE) as f:
         return yaml.safe_load(f)["attacks"]
-
 
 def detect_vulnerability(response_text: str, attack: dict) -> tuple[str, str]:
     """Returns (status, reason). status is 'vulnerable' | 'safe' | 'uncertain'."""
@@ -61,12 +59,10 @@ def detect_vulnerability(response_text: str, attack: dict) -> tuple[str, str]:
         return "safe", "Model refused the request"
     return "uncertain", "Could not determine compliance automatically"
 
-
 class ScanRequest(BaseModel):
     model: str        # e.g. llama3, mistral
     attack_ids: list[str]
     system_prompt: str = ""
-
 
 class AttackResult(BaseModel):
     id: str
@@ -75,14 +71,12 @@ class AttackResult(BaseModel):
     severity: str
     prompt: str
     response: str
-    status: str       # vulnerable | safe | uncertain | error
+    status: str
     reason: str
-
 
 @app.get("/")
 def root():
     return {"status": "ok"}
-
 
 @app.get("/status")
 async def ollama_status():
@@ -96,7 +90,6 @@ async def ollama_status():
             pass
     return {"connected": False, "url": LLM_URL}
 
-
 @app.get("/models")
 async def list_models():
     """Return models installed in Ollama."""
@@ -109,7 +102,6 @@ async def list_models():
         except Exception as e:
             raise HTTPException(503, f"Could not reach Ollama at {LLM_URL}: {e}")
 
-
 @app.get("/attacks")
 def list_attacks():
     """Return all attack definitions (id, name, category, severity)."""
@@ -118,7 +110,6 @@ def list_attacks():
         {k: a[k] for k in ("id", "name", "category", "severity")}
         for a in attacks
     ]
-
 
 @app.post("/scan", response_model=list[AttackResult])
 async def scan(req: ScanRequest):
@@ -143,7 +134,6 @@ async def scan(req: ScanRequest):
 
             response_text = ""
             try:
-                # Try OpenAI-compatible endpoint first, fall back to Ollama native
                 resp = await client.post(
                     f"{base_url}/v1/chat/completions",
                     json=payload,
@@ -183,7 +173,6 @@ async def scan(req: ScanRequest):
             ))
 
     return results
-
 
 if __name__ == "__main__":
     import uvicorn

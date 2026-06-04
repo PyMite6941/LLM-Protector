@@ -262,6 +262,21 @@
   font-size: 0.9rem;
 }
 
+.backend-down pre {
+  margin: 0.5rem 0;
+  background: #2a0000;
+  padding: 0.5rem 0.75rem;
+  border-radius: 5px;
+  font-size: 0.82rem;
+  color: #ffb3b3;
+}
+
+.backend-down .btn-ghost {
+  margin-top: 0.5rem;
+  border-color: #ff4d4d;
+  color: #ff8a8a;
+}
+
 /* ── Results ────────────────────────────────────────────────────────────── */
 .results-summary {
   display: flex;

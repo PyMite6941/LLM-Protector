@@ -23,22 +23,17 @@ export default function App() {
   const [results, setResults]           = useState([]);
   const [error, setError]               = useState('');
 
-  // Check Ollama connection + load models + load attacks on mount
-  useEffect(() => {
+  function loadFromBackend() {
+    setError('');
+
     fetch(`${API}/status`)
       .then(r => r.json())
-      .then(d => {
-        setOllamaOk(d.connected);
-        setOllamaUrl(d.url);
-      })
+      .then(d => { setOllamaOk(d.connected); setOllamaUrl(d.url); })
       .catch(() => setOllamaOk(false));
 
     fetch(`${API}/models`)
       .then(r => r.json())
-      .then(list => {
-        setModels(list);
-        if (list.length > 0) setModel(list[0]);
-      })
+      .then(list => { setModels(list); if (list.length > 0) setModel(list[0]); })
       .catch(() => {});
 
     fetch(`${API}/attacks`)
@@ -50,8 +45,10 @@ export default function App() {
         setAttacks(sorted);
         setSelected(new Set(sorted.map(a => a.id)));
       })
-      .catch(() => setError('Could not load attacks. Is the backend running?  →  cd backend && python main.py'));
-  }, []);
+      .catch(() => setError('backend_down'));
+  }
+
+  useEffect(() => { loadFromBackend(); }, []);
 
   const categories = [...new Set(attacks.map(a => a.category))];
 
@@ -131,17 +128,12 @@ export default function App() {
           <div className="config-grid">
             <label>
               Model
-              {models.length > 0 ? (
-                <select value={model} onChange={e => setModel(e.target.value)}>
-                  {models.map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              ) : (
-                <input
-                  value={model}
-                  onChange={e => setModel(e.target.value)}
-                  placeholder="e.g. llama3, mistral, phi3"
-                />
-              )}
+              <select value={model} onChange={e => setModel(e.target.value)}>
+                {models.length === 0
+                  ? <option value="">No models found — run: ollama pull llama3</option>
+                  : models.map(m => <option key={m} value={m}>{m}</option>)
+                }
+              </select>
             </label>
             <label className="full-width">
               System Prompt to Test <span className="optional">(optional — leave blank to test bare model)</span>
@@ -206,7 +198,15 @@ export default function App() {
           })}
         </section>
 
-        {error && <div className="error-box">{error}</div>}
+        {error === 'backend_down' ? (
+          <div className="error-box backend-down">
+            <strong>Backend not reachable</strong> — make sure it's running:
+            <pre>cd backend{'\n'}.venv\Scripts\python.exe main.py</pre>
+            <button className="btn-ghost" onClick={loadFromBackend}>Retry</button>
+          </div>
+        ) : error ? (
+          <div className="error-box">{error}</div>
+        ) : null}
 
         <button
           className="btn-primary run-btn"
