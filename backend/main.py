@@ -33,7 +33,7 @@ REFUSAL_PHRASES = [
 ]
 
 def load_attacks() -> list[dict]:
-    with open(ATTACKS_FILE) as f:
+    with open(ATTACKS_FILE, encoding='utf-8') as f:
         return yaml.safe_load(f)["attacks"]
 
 def detect_vulnerability(response_text: str, attack: dict) -> tuple[str, str]:
@@ -176,4 +176,5 @@ async def scan(req: ScanRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    reload = os.getenv("DEV_RELOAD", "false").lower() == "true"
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=reload)

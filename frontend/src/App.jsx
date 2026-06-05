@@ -23,20 +23,21 @@ export default function App() {
   const [results, setResults]           = useState([]);
   const [error, setError]               = useState('');
 
-  function loadFromBackend() {
+  function loadFromBackend(signal) {
     setError('');
+    const opts = signal ? { signal } : {};
 
-    fetch(`${API}/status`)
+    fetch(`${API}/status`, opts)
       .then(r => r.json())
       .then(d => { setOllamaOk(d.connected); setOllamaUrl(d.url); })
-      .catch(() => setOllamaOk(false));
+      .catch(e => { if (e.name !== 'AbortError') setOllamaOk(false); });
 
-    fetch(`${API}/models`)
+    fetch(`${API}/models`, opts)
       .then(r => r.json())
       .then(list => { setModels(list); if (list.length > 0) setModel(list[0]); })
       .catch(() => {});
 
-    fetch(`${API}/attacks`)
+    fetch(`${API}/attacks`, opts)
       .then(r => r.json())
       .then(data => {
         const sorted = [...data].sort(
@@ -45,10 +46,14 @@ export default function App() {
         setAttacks(sorted);
         setSelected(new Set(sorted.map(a => a.id)));
       })
-      .catch(() => setError('backend_down'));
+      .catch(e => { if (e.name !== 'AbortError') setError('backend_down'); });
   }
 
-  useEffect(() => { loadFromBackend(); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    loadFromBackend(controller.signal);
+    return () => controller.abort();
+  }, []);
 
   const categories = [...new Set(attacks.map(a => a.category))];
 
