@@ -1,7 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Component } from 'react';
 import './App.css';
 
-const API = 'http://localhost:8000';
+export class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) return (
+      <div style={{ padding: '2rem', fontFamily: 'monospace', color: '#ff4d4d' }}>
+        <h2>Render error</h2>
+        <pre>{this.state.error.message}</pre>
+        <pre>{this.state.error.stack}</pre>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+const API = 'http://127.0.0.1:8000';
 
 const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 };
 const STATUS_LABEL = {
@@ -34,7 +49,12 @@ export default function App() {
 
     fetch(`${API}/models`, opts)
       .then(r => r.json())
-      .then(list => { setModels(list); if (list.length > 0) setModel(list[0]); })
+      .then(list => {
+        if (Array.isArray(list)) {
+          setModels(list);
+          if (list.length > 0) { setModel(list[0]); setOllamaOk(true); }
+        }
+      })
       .catch(() => {});
 
     fetch(`${API}/attacks`, opts)
@@ -108,6 +128,7 @@ export default function App() {
   const unknownCount = results.filter(r => r.status === 'uncertain').length;
 
   return (
+    <ErrorBoundary>
     <div className="app">
       <header className="app-header">
         <div className="header-top">
@@ -267,5 +288,6 @@ export default function App() {
         )}
       </main>
     </div>
+    </ErrorBoundary>
   );
 }

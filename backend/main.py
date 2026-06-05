@@ -86,9 +86,9 @@ async def ollama_status():
             resp = await client.get(f"{LLM_URL}/api/tags")
             if resp.status_code == 200:
                 return {"connected": True, "url": LLM_URL}
-        except Exception:
-            pass
-    return {"connected": False, "url": LLM_URL}
+            return {"connected": False, "url": LLM_URL, "error": f"HTTP {resp.status_code}"}
+        except Exception as e:
+            return {"connected": False, "url": LLM_URL, "error": str(e)}
 
 @app.get("/models")
 async def list_models():

@@ -64,17 +64,26 @@ wait_for_port() {
 }
 
 # --- Ollama ---
-if ! port_open 11434; then
-  OLLAMA=$(command -v ollama 2>/dev/null || echo "$USERPROFILE/AppData/Local/Programs/Ollama/ollama.exe")
-  if [ -f "$OLLAMA" ]; then
-    echo "Starting Ollama ..."
-    "$OLLAMA" serve & OLLAMA_PID=$!
-    wait_for_port 11434 "Ollama" || echo "WARNING: Ollama unreachable."
+if $IS_WSL; then
+  # In WSL, Ollama is a Windows process -- can't start it here
+  if port_open 11434; then
+    echo "Ollama detected (Windows host)."
   else
-    echo "WARNING: Ollama not found -- start it manually."
+    echo "WARNING: Ollama not running. Open Ollama Desktop on Windows first."
   fi
 else
-  echo "Ollama already running."
+  if ! port_open 11434; then
+    OLLAMA=$(command -v ollama 2>/dev/null || echo "$USERPROFILE/AppData/Local/Programs/Ollama/ollama.exe")
+    if [ -f "$OLLAMA" ]; then
+      echo "Starting Ollama ..."
+      "$OLLAMA" serve 2>/dev/null & OLLAMA_PID=$!
+      wait_for_port 11434 "Ollama" || echo "WARNING: Ollama unreachable."
+    else
+      echo "WARNING: Ollama not found -- start it manually."
+    fi
+  else
+    echo "Ollama already running."
+  fi
 fi
 
 # --- Backend ---
@@ -87,9 +96,14 @@ if ! kill -0 $BACKEND_PID 2>/dev/null; then
   echo "ERROR: Backend crashed on startup. Check the output above."
   exit 1
 fi
-wait_for_port 8000 "Backend" || exit 1
+wait_for_port 8000 "backend" || exit 1
 
 # --- Frontend ---
 echo "Starting frontend ..."
-cd "$SCRIPT_DIR/frontend"
-npm run dev
+if $IS_WSL; then
+  WIN_FRONTEND="$(wslpath -w "$SCRIPT_DIR/frontend")"
+  cmd.exe /c "cd /d \"$WIN_FRONTEND\" && npm run dev"
+else
+  cd "$SCRIPT_DIR/frontend"
+  npm run dev
+fi
