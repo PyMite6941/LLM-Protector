@@ -26,3 +26,6 @@ __pycache__
 *.njsproj
 *.sln
 *.sw?
+
+# Private planning notes
+NEXT_STEPS.md

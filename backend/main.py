@@ -1,13 +1,27 @@
+import asyncio
+import json
+import logging
 import os
+import subprocess
+import time
 import yaml
 import httpx
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger("llm-protector")
+
+# How many attacks to run against Ollama at the same time
+SCAN_CONCURRENCY = int(os.getenv("SCAN_CONCURRENCY", "3"))
+# Cap on response length — detection only needs the start of the answer
+SCAN_MAX_TOKENS = int(os.getenv("SCAN_MAX_TOKENS", "256"))
 
 app = FastAPI(title="LLM Protector API")
 
@@ -19,7 +33,37 @@ app.add_middleware(
 )
 
 ATTACKS_FILE = Path(__file__).parent / "test_attacks.yaml"
-LLM_URL = os.getenv("LLM_URL", "http://localhost:11434")
+
+def _is_wsl() -> bool:
+    try:
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
+        return False
+
+def _resolve_llm_url() -> str:
+    url = os.getenv("LLM_URL", "http://localhost:11434").rstrip("/")
+    if not _is_wsl():
+        return url
+    # In WSL2, localhost is not the Windows host — try the default gateway too
+    candidates = [url]
+    if "127.0.0.1" in url or "localhost" in url:
+        try:
+            route = subprocess.check_output(["ip", "route", "show", "default"], text=True)
+            win_host = route.split()[2]
+            candidates.append(url.replace("127.0.0.1", win_host).replace("localhost", win_host))
+        except (subprocess.SubprocessError, IndexError, FileNotFoundError):
+            pass
+    for candidate in candidates:
+        try:
+            httpx.get(f"{candidate}/api/tags", timeout=2.0)
+            print(f"Ollama reachable at {candidate}")
+            return candidate
+        except httpx.HTTPError:
+            continue
+    return url
+
+LLM_URL = _resolve_llm_url()
 
 REFUSAL_PHRASES = [
     "i cannot", "i can't", "i'm unable", "i am unable", "i won't", "i will not",
@@ -111,57 +155,72 @@ def list_attacks():
         for a in attacks
     ]
 
-@app.post("/scan", response_model=list[AttackResult])
+async def query_model(client: httpx.AsyncClient, base_url: str, model: str,
+                      system_prompt: str, attack: dict) -> str:
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": attack["prompt"]})
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "max_tokens": SCAN_MAX_TOKENS,
+    }
+    resp = await client.post(f"{base_url}/v1/chat/completions", json=payload)
+    if resp.status_code == 200:
+        return resp.json()["choices"][0]["message"]["content"]
+
+    # Fall back to Ollama's native API
+    payload.pop("max_tokens")
+    payload["options"] = {"num_predict": SCAN_MAX_TOKENS}
+    resp2 = await client.post(f"{base_url}/api/chat", json=payload)
+    resp2.raise_for_status()
+    return resp2.json()["message"]["content"]
+
+@app.post("/scan")
 async def scan(req: ScanRequest):
+    """Run the selected attacks and stream progress as NDJSON.
+
+    Each line is one of:
+      {"type": "log",    "message": "..."}
+      {"type": "result", "data": {AttackResult fields}}
+      {"type": "done",   "counts": {"vulnerable": n, "safe": n, ...}}
+    """
     attacks = load_attacks()
-    selected = {a["id"]: a for a in attacks if a["id"] in req.attack_ids}
+    selected = [a for a in attacks if a["id"] in req.attack_ids]
 
     if not selected:
         raise HTTPException(400, "No valid attack IDs provided")
 
     base_url = LLM_URL.rstrip("/")
-    headers = {"Content-Type": "application/json"}
-    results: list[AttackResult] = []
+    sem = asyncio.Semaphore(SCAN_CONCURRENCY)
+    queue: asyncio.Queue = asyncio.Queue()
+    counts: dict[str, int] = {}
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for attack_id, attack in selected.items():
-            messages = []
-            if req.system_prompt:
-                messages.append({"role": "system", "content": req.system_prompt})
-            messages.append({"role": "user", "content": attack["prompt"]})
+    async def emit_log(message: str):
+        log.info(message)
+        await queue.put({"type": "log", "message": message})
 
-            payload = {"model": req.model, "messages": messages, "stream": False}
-
+    async def run_attack(client: httpx.AsyncClient, attack: dict):
+        async with sem:
+            await emit_log(f"[{attack['id']}] sending prompt ({attack['severity']} / {attack['category']}) ...")
+            start = time.monotonic()
             response_text = ""
             try:
-                resp = await client.post(
-                    f"{base_url}/v1/chat/completions",
-                    json=payload,
-                    headers=headers,
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    response_text = data["choices"][0]["message"]["content"]
-                else:
-                    resp2 = await client.post(
-                        f"{base_url}/api/chat",
-                        json=payload,
-                        headers=headers,
-                    )
-                    resp2.raise_for_status()
-                    data = resp2.json()
-                    response_text = data["message"]["content"]
-
+                response_text = await query_model(client, base_url, req.model,
+                                                  req.system_prompt, attack)
                 status, reason = detect_vulnerability(response_text, attack)
-
             except httpx.ConnectError:
                 status, reason = "error", f"Could not connect to Ollama at {base_url}"
-                response_text = ""
             except Exception as e:
                 status, reason = "error", str(e)
-                response_text = ""
 
-            results.append(AttackResult(
+            elapsed = time.monotonic() - start
+            counts[status] = counts.get(status, 0) + 1
+            await emit_log(f"[{attack['id']}] {status.upper()} in {elapsed:.1f}s — {reason}")
+            await queue.put({"type": "result", "data": AttackResult(
                 id=attack["id"],
                 name=attack["name"],
                 category=attack["category"],
@@ -170,9 +229,35 @@ async def scan(req: ScanRequest):
                 response=response_text[:800],  # cap for UI
                 status=status,
                 reason=reason,
-            ))
+            ).model_dump()})
 
-    return results
+    async def producer():
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                await asyncio.gather(*(run_attack(client, a) for a in selected))
+        except Exception as e:
+            log.exception("scan failed")
+            await queue.put({"type": "log", "message": f"Scan aborted: {e}"})
+        finally:
+            await queue.put(None)
+
+    async def stream():
+        task = asyncio.create_task(producer())
+        await emit_log(
+            f"Scan started: {len(selected)} attacks against '{req.model}' "
+            f"(concurrency {SCAN_CONCURRENCY}, max {SCAN_MAX_TOKENS} tokens per response)"
+        )
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield json.dumps(item) + "\n"
+        summary = ", ".join(f"{v} {k}" for k, v in sorted(counts.items())) or "no results"
+        log.info(f"Scan finished: {summary}")
+        yield json.dumps({"type": "done", "counts": counts}) + "\n"
+        await task
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 if __name__ == "__main__":
     import uvicorn

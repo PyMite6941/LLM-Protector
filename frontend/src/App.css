@@ -378,6 +378,45 @@
   color: var(--text-h, #eee);
 }
 
+/* ── Backend log ────────────────────────────────────────────────────────── */
+.progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg, #0d0d0d);
+  border: 1px solid var(--border);
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent, #aa3bff);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.log-panel {
+  background: var(--bg, #0d0d0d);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  max-height: 220px;
+  overflow-y: auto;
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.log-line {
+  color: var(--text-2, #9a9a9a);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-line:last-of-type {
+  color: var(--text-h, #eee);
+}
+
 @media (max-width: 640px) {
   .config-grid { grid-template-columns: 1fr; }
   .result-cols { grid-template-columns: 1fr; }

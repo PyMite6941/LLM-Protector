@@ -1,4 +1,4 @@
-import { useState, useEffect, Component } from 'react';
+import { useState, useEffect, useRef, Component } from 'react';
 import './App.css';
 
 export class ErrorBoundary extends Component {
@@ -36,10 +36,15 @@ export default function App() {
   const [selected, setSelected]         = useState(new Set());
   const [loading, setLoading]           = useState(false);
   const [results, setResults]           = useState([]);
+  const [logs, setLogs]                 = useState([]);
   const [error, setError]               = useState('');
+  const logEndRef = useRef(null);
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [logs]);
 
   function loadFromBackend(signal) {
-    setError('');
     const opts = signal ? { signal } : {};
 
     fetch(`${API}/status`, opts)
@@ -95,11 +100,27 @@ export default function App() {
     });
   }
 
+  function handleScanMessage(msg) {
+    if (msg.type === 'result') {
+      setResults(prev => [...prev, msg.data]);
+    } else if (msg.type === 'log') {
+      const time = new Date().toLocaleTimeString();
+      setLogs(prev => [...prev, `${time}  ${msg.message}`]);
+    } else if (msg.type === 'done') {
+      const time = new Date().toLocaleTimeString();
+      const summary = Object.entries(msg.counts ?? {})
+        .map(([k, v]) => `${v} ${k}`)
+        .join(', ') || 'no results';
+      setLogs(prev => [...prev, `${time}  Scan finished: ${summary}`]);
+    }
+  }
+
   async function runScan() {
     if (!model) { setError('Select a model first.'); return; }
     if (selected.size === 0) { setError('Select at least one attack.'); return; }
     setError('');
     setResults([]);
+    setLogs([]);
     setLoading(true);
     try {
       const resp = await fetch(`${API}/scan`, {
@@ -115,7 +136,23 @@ export default function App() {
         const text = await resp.text();
         throw new Error(`Server error ${resp.status}: ${text}`);
       }
-      setResults(await resp.json());
+
+      // The backend streams NDJSON — handle each line as it arrives
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep the last partial line in the buffer
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          handleScanMessage(JSON.parse(line));
+        }
+      }
+      if (buffer.trim()) handleScanMessage(JSON.parse(buffer));
     } catch (e) {
       setError(e.message);
     } finally {
@@ -228,7 +265,7 @@ export default function App() {
           <div className="error-box backend-down">
             <strong>Backend not reachable</strong> — make sure it's running:
             <pre>cd backend{'\n'}.venv\Scripts\python.exe main.py</pre>
-            <button className="btn-ghost" onClick={loadFromBackend}>Retry</button>
+            <button className="btn-ghost" onClick={() => { setError(''); loadFromBackend(); }}>Retry</button>
           </div>
         ) : error ? (
           <div className="error-box">{error}</div>
@@ -243,6 +280,30 @@ export default function App() {
             ? `Scanning… (${results.length} / ${selected.size})`
             : `Run ${selected.size} Attack${selected.size !== 1 ? 's' : ''}`}
         </button>
+
+        {/* ── BACKEND LOG ── */}
+        {logs.length > 0 && (
+          <section className="card">
+            <h2>
+              Backend Log
+              {loading && <span className="badge">live</span>}
+            </h2>
+            {loading && selected.size > 0 && (
+              <div className="progress-track">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${(results.length / selected.size) * 100}%` }}
+                />
+              </div>
+            )}
+            <div className="log-panel">
+              {logs.map((line, i) => (
+                <div key={i} className="log-line">{line}</div>
+              ))}
+              <div ref={logEndRef} />
+            </div>
+          </section>
+        )}
 
         {/* ── RESULTS ── */}
         {results.length > 0 && (
