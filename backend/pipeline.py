@@ -117,7 +117,7 @@ async def run(args) -> int:
 
     per_model: dict[str, dict] = {}
     for model in models:
-        print(f"▶ Scanning {model} — {len(selected)} attacks ...", flush=True)
+        print(f"Scanning {model} - {len(selected)} attacks ...", flush=True)
         results = await scan_model(
             model, selected, system_prompt=args.system_prompt,
             base_url=args.base_url, concurrency=args.concurrency,

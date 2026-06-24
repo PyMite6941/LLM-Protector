@@ -16,6 +16,7 @@ dist-ssr
 *.local
 __pycache__
 runs/
+demo_runs/
 
 # Editor directories and files
 .vscode/*

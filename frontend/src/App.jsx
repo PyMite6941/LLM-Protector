@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, Component } from 'react';
 import './App.css';
+import demoData from './demoData.json';
 
 export class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null }; }
@@ -17,6 +18,8 @@ export class ErrorBoundary extends Component {
 }
 
 const API = 'http://127.0.0.1:8000';
+const DEMO = import.meta.env.VITE_DEMO_MODE === '1';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 };
 const STATUS_LABEL = {
@@ -27,7 +30,7 @@ const STATUS_LABEL = {
 };
 
 export default function App() {
-  const [ollamaOk, setOllamaOk]         = useState(null); // null=checking, true, false
+  const [ollamaOk, setOllamaOk]         = useState(null);
   const [ollamaUrl, setOllamaUrl]        = useState('');
   const [models, setModels]             = useState([]);
   const [model, setModel]               = useState('');
@@ -74,7 +77,20 @@ export default function App() {
       .catch(e => { if (e.name !== 'AbortError') setError('backend_down'); });
   }
 
+  function loadFromDemo() {
+    const sorted = [...demoData.attacks].sort(
+      (a, b) => (SEVERITY_ORDER[a.severity] ?? 3) - (SEVERITY_ORDER[b.severity] ?? 3)
+    );
+    setAttacks(sorted);
+    setSelected(new Set(sorted.map(a => a.id)));
+    const names = demoData.models.map(m => m.model);
+    setModels(names);
+    if (names.length > 0) setModel(names[0]);
+    setOllamaOk(true);
+  }
+
   useEffect(() => {
+    if (DEMO) { loadFromDemo(); return; }
     const controller = new AbortController();
     loadFromBackend(controller.signal);
     return () => controller.abort();
@@ -115,7 +131,31 @@ export default function App() {
     }
   }
 
+  async function runDemoScan() {
+    setError('');
+    setResults([]);
+    setLogs([]);
+    setLoading(true);
+    const md = demoData.models.find(m => m.model === model) || demoData.models[0];
+    const chosen = (md?.results ?? []).filter(r => selected.has(r.id));
+    const t0 = new Date().toLocaleTimeString();
+    setLogs([`${t0}  Demo scan started: replaying ${chosen.length} recorded attacks against '${md?.model}'`]);
+    const counts = {};
+    for (const r of chosen) {
+      await sleep(40);
+      setResults(prev => [...prev, r]);
+      counts[r.status] = (counts[r.status] ?? 0) + 1;
+      const t = new Date().toLocaleTimeString();
+      setLogs(prev => [...prev, `${t}  [${r.id}] ${r.status.toUpperCase()} - ${r.reason}`]);
+    }
+    const t1 = new Date().toLocaleTimeString();
+    const summary = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ') || 'no results';
+    setLogs(prev => [...prev, `${t1}  Scan finished: ${summary} · risk ${md?.score?.risk_score} (grade ${md?.score?.grade})`]);
+    setLoading(false);
+  }
+
   async function runScan() {
+    if (DEMO) return runDemoScan();
     if (!model) { setError('Select a model first.'); return; }
     if (selected.size === 0) { setError('Select at least one attack.'); return; }
     setError('');
@@ -137,7 +177,6 @@ export default function App() {
         throw new Error(`Server error ${resp.status}: ${text}`);
       }
 
-      // The backend streams NDJSON — handle each line as it arrives
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
@@ -146,7 +185,7 @@ export default function App() {
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop(); // keep the last partial line in the buffer
+        buffer = lines.pop();
         for (const line of lines) {
           if (!line.trim()) continue;
           handleScanMessage(JSON.parse(line));
@@ -163,6 +202,9 @@ export default function App() {
   const vulnCount    = results.filter(r => r.status === 'vulnerable').length;
   const safeCount    = results.filter(r => r.status === 'safe').length;
   const unknownCount = results.filter(r => r.status === 'uncertain').length;
+  const demoModel    = DEMO ? demoData.models.find(m => m.model === model) : null;
+  const demoIds      = demoModel ? new Set(demoModel.results.map(r => r.id)) : null;
+  const scanTotal    = demoIds ? [...selected].filter(id => demoIds.has(id)).length : selected.size;
 
   return (
     <ErrorBoundary>
@@ -174,18 +216,36 @@ export default function App() {
             <p className="subtitle">Local LLM Security Scanner</p>
           </div>
           <div className="ollama-status">
-            <span className={`status-dot ${ollamaOk === null ? 'dot-checking' : ollamaOk ? 'dot-ok' : 'dot-err'}`} />
+            <span className={`status-dot ${DEMO ? 'dot-ok' : ollamaOk === null ? 'dot-checking' : ollamaOk ? 'dot-ok' : 'dot-err'}`} />
             <span className="status-text">
-              {ollamaOk === null && 'Connecting…'}
-              {ollamaOk === true  && `Ollama connected · ${ollamaUrl}`}
-              {ollamaOk === false && `Ollama unreachable · ${ollamaUrl || 'localhost:11434'}`}
+              {DEMO
+                ? 'Demo mode · replaying a real recorded scan'
+                : <>
+                    {ollamaOk === null && 'Connecting…'}
+                    {ollamaOk === true  && `Ollama connected · ${ollamaUrl}`}
+                    {ollamaOk === false && `Ollama unreachable · ${ollamaUrl || 'localhost:11434'}`}
+                  </>}
             </span>
           </div>
         </div>
       </header>
 
       <main className="app-main">
-        {/* ── MODEL + SYSTEM PROMPT ── */}
+        {DEMO && (
+          <div style={{
+            margin: '0 0 18px', padding: '13px 16px',
+            border: '1px solid #6d4bd8', borderRadius: 10,
+            background: 'linear-gradient(90deg, rgba(137,87,229,0.14), rgba(88,166,255,0.08))',
+            color: '#cbd5e1', fontSize: '0.95rem', lineHeight: 1.55,
+          }}>
+            <strong style={{ color: '#fff' }}>Live demo.</strong> These are <em>real</em> results from a recorded
+            benchmark of local Ollama models, replayed instantly — nothing runs server-side, so it can't stall or
+            break. Pick a model and run a scan. The full tool runs locally against your own models:{' '}
+            <a href="https://github.com/PyMite6941/LLM-Protector" target="_blank" rel="noreferrer"
+               style={{ color: '#8ab4ff' }}>GitHub →</a>
+          </div>
+        )}
+
         <section className="card">
           <h2>Target</h2>
           <div className="config-grid">
@@ -199,16 +259,17 @@ export default function App() {
               </select>
             </label>
             <label className="full-width">
-              System Prompt to Test <span className="optional">(optional — leave blank to test bare model)</span>
+              System Prompt to Test <span className="optional">{DEMO ? '(disabled in demo)' : '(optional — leave blank to test bare model)'}</span>
               <textarea
                 rows={3}
                 value={systemPrompt}
                 onChange={e => setSystemPrompt(e.target.value)}
                 placeholder="Paste the system prompt you want to protect…"
+                disabled={DEMO}
               />
             </label>
           </div>
-          {ollamaOk === false && (
+          {!DEMO && ollamaOk === false && (
             <div className="info-box">
               Ollama isn't running. Start it with: <code>ollama serve</code>
               {models.length === 0 && <>, then pull a model: <code>ollama pull llama3</code></>}
@@ -216,7 +277,6 @@ export default function App() {
           )}
         </section>
 
-        {/* ── ATTACK SELECTION ── */}
         <section className="card">
           <div className="attack-header">
             <h2>
@@ -274,25 +334,24 @@ export default function App() {
         <button
           className="btn-primary run-btn"
           onClick={runScan}
-          disabled={loading || !ollamaOk}
+          disabled={loading || (!DEMO && !ollamaOk)}
         >
           {loading
-            ? `Scanning… (${results.length} / ${selected.size})`
-            : `Run ${selected.size} Attack${selected.size !== 1 ? 's' : ''}`}
+            ? `Scanning… (${results.length} / ${scanTotal})`
+            : `Run ${scanTotal} Attack${scanTotal !== 1 ? 's' : ''}`}
         </button>
 
-        {/* ── BACKEND LOG ── */}
         {logs.length > 0 && (
           <section className="card">
             <h2>
               Backend Log
               {loading && <span className="badge">live</span>}
             </h2>
-            {loading && selected.size > 0 && (
+            {loading && scanTotal > 0 && (
               <div className="progress-track">
                 <div
                   className="progress-fill"
-                  style={{ width: `${(results.length / selected.size) * 100}%` }}
+                  style={{ width: `${(results.length / scanTotal) * 100}%` }}
                 />
               </div>
             )}
@@ -305,7 +364,6 @@ export default function App() {
           </section>
         )}
 
-        {/* ── RESULTS ── */}
         {results.length > 0 && (
           <section className="card">
             <h2>Results</h2>
@@ -314,6 +372,11 @@ export default function App() {
               <span className="summary-pill pill-safe">{safeCount} Safe</span>
               {unknownCount > 0 && (
                 <span className="summary-pill pill-uncertain">{unknownCount} Uncertain</span>
+              )}
+              {demoModel && (
+                <span className="summary-pill" style={{ background: '#6d4bd8', color: '#fff' }}>
+                  Risk {demoModel.score.risk_score} · Grade {demoModel.score.grade}
+                </span>
               )}
             </div>
 
