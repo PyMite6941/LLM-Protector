@@ -4,7 +4,7 @@ Hello, I am Matt and I am a Cybersecurity student creating useful tools for the 
 
 LLM Protector scans a local Ollama model for prompt-injection and jailbreak vulnerabilities. It runs a library of attack prompts (`backend/test_attacks.yaml`) against the model you pick and reports each attack as vulnerable, safe, or uncertain.
 
-**Live demo:** https://frontend-theta-amber-80.vercel.app (replays a real recorded scan, no install needed — see "LIVE WEB DEMO" below).
+**Live demo:** https://llm-protector.vercel.app (replays a real recorded scan, no install needed — see "LIVE WEB DEMO" below).
 
 ## QUICK START
 
@@ -111,13 +111,12 @@ Status as of 2026-06-24. The live demo is deployed and working; the items below 
 3. The demo data already lives in `frontend/src/demoData.json` (committed). To run the **live** local tool: start Ollama, `cd backend && python main.py`, then `cd frontend && npm run dev`.
 
 ### Deployment facts (already done)
-- Deployed to Vercel project **`frontend`** under scope `matt-gs-projects-e73d6b76`.
-- Live production URL: **https://frontend-theta-amber-80.vercel.app**
-- Demo mode is forced on the deployed build via `frontend/.env.production` (`VITE_DEMO_MODE=1`) and the deploy was also run with `-b VITE_DEMO_MODE=1`. `.vercel/` is gitignored.
-- Redeploy after changing the frontend or demo data: `cd frontend && vercel --prod --yes -b VITE_DEMO_MODE=1`.
+- Deployed to Vercel project **`llm-protector`** under scope `matt-gs-projects-e73d6b76`. Its Root Directory is set to `frontend`, so **deploy from the repo root**, not the `frontend/` subdir.
+- Live production URL: **https://llm-protector.vercel.app**
+- Demo mode is forced on the deployed build via `frontend/.env.production` (`VITE_DEMO_MODE=1`) and the deploy is also run with `-b VITE_DEMO_MODE=1`. `.vercel/` is gitignored; a root `.vercelignore` excludes the venvs/node_modules so uploads from the root stay clean.
+- Redeploy after changing the frontend or demo data, **from the repo root**: `vercel --prod --yes -b VITE_DEMO_MODE=1`.
 
 ### Open follow-ups
-- [ ] **(Cosmetic) Rename the Vercel project** from `frontend` to `llm-protector` for a cleaner URL. Do it in the Vercel dashboard → Project Settings → Name. The production URL will change; update the link in the portfolio + this README if you do.
 - [ ] **Add an LLM Protector card to the portfolio** at `portfolio/portfolio-website/pages/projects.html`. Copy an existing `.card-container`, set `data-tags="Python|AI|Cybersecurity"`, title "LLM Protector", describe it, and link the live demo URL above as "View live demo". This is how the demo gets discovered from the site. (Tag it with the `.ai-badge` only if you consider it AI-generated.)
 - [ ] **Build the Cybersecurity Lab page** — see `portfolio/portfolio-website/CYBERSECURITY_PAGE_PLAN.md`, which has the full content plan + step-by-step TODO. LLM Protector is section 6 of that page (link the live demo there).
 - [ ] **(Robustness) Reduce scan timeouts** so future demo runs don't drop results. In `backend/scanner.py`'s `run_attack`, add a single retry on exception (sleep ~1s, retry once) and/or send one throwaway "warmup" request per model before the batch so the model is loaded before timing starts. The current demo data was generated at `--concurrency 1`, and timeout-`error` results are filtered out by `make_demo_data.py` (they're tool timeouts, not model findings). Regenerate with the commands in the "LIVE WEB DEMO → Regenerate" section.

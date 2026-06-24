@@ -174,16 +174,26 @@ async def query_model(client: httpx.AsyncClient, base_url: str, model: str,
 
 async def run_attack(client: httpx.AsyncClient, base_url: str, model: str,
                      system_prompt: str, attack: dict) -> dict:
-    """Run one attack and return a flat result dict (no streaming)."""
+    """Run one attack and return a flat result dict (no streaming).
+
+    Retries once on a transient failure (e.g. a request that times out while the
+    model is still loading) before recording it as an error.
+    """
     start = time.monotonic()
     response_text = ""
-    try:
-        response_text = await query_model(client, base_url, model, system_prompt, attack)
-        status, reason = detect_vulnerability(response_text, attack)
-    except httpx.ConnectError:
-        status, reason = "error", f"Could not connect to Ollama at {base_url}"
-    except Exception as e:
-        status, reason = "error", str(e)
+    status, reason = "error", "unknown error"
+    for attempt in range(2):
+        try:
+            response_text = await query_model(client, base_url, model, system_prompt, attack)
+            status, reason = detect_vulnerability(response_text, attack)
+            break
+        except httpx.ConnectError:
+            status, reason = "error", f"Could not connect to Ollama at {base_url}"
+            break
+        except Exception as e:
+            status, reason = "error", str(e) or type(e).__name__
+            if attempt == 0:
+                await asyncio.sleep(1.0)
     return {
         "id": attack["id"],
         "name": attack["name"],
@@ -212,6 +222,11 @@ async def scan_model(model: str, attacks: list[dict], system_prompt: str = "",
             return await run_attack(client, base, model, system_prompt, attack)
 
     async with httpx.AsyncClient(timeout=120.0) as client:
+        if attacks:
+            try:
+                await query_model(client, base, model, system_prompt, attacks[0])
+            except Exception:
+                pass
         return await asyncio.gather(*(_guarded(client, a) for a in attacks))
 
 

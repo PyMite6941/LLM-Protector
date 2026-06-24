@@ -1,0 +1,8 @@
+backend/.venv
+backend/.venv-linux
+backend/__pycache__
+backend/demo_runs
+backend/runs
+node_modules
+frontend/node_modules
+.git
