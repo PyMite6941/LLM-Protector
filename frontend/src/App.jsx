@@ -22,6 +22,10 @@ const DEMO = import.meta.env.VITE_DEMO_MODE === '1';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 };
+const DEMO_ATTACKS = DEMO
+  ? [...demoData.attacks].sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 3) - (SEVERITY_ORDER[b.severity] ?? 3))
+  : [];
+const DEMO_MODELS = DEMO ? demoData.models.map(m => m.model) : [];
 const STATUS_LABEL = {
   vulnerable: { text: 'VULNERABLE', color: '#ff4d4d' },
   safe:       { text: 'SAFE',       color: '#4caf50' },
@@ -30,13 +34,13 @@ const STATUS_LABEL = {
 };
 
 export default function App() {
-  const [ollamaOk, setOllamaOk]         = useState(null);
+  const [ollamaOk, setOllamaOk]         = useState(DEMO ? true : null);
   const [ollamaUrl, setOllamaUrl]        = useState('');
-  const [models, setModels]             = useState([]);
-  const [model, setModel]               = useState('');
+  const [models, setModels]             = useState(DEMO ? DEMO_MODELS : []);
+  const [model, setModel]               = useState(DEMO && DEMO_MODELS.length > 0 ? DEMO_MODELS[0] : '');
   const [systemPrompt, setSystemPrompt] = useState('');
-  const [attacks, setAttacks]           = useState([]);
-  const [selected, setSelected]         = useState(new Set());
+  const [attacks, setAttacks]           = useState(DEMO ? DEMO_ATTACKS : []);
+  const [selected, setSelected]         = useState(DEMO ? new Set(DEMO_ATTACKS.map(a => a.id)) : new Set());
   const [loading, setLoading]           = useState(false);
   const [results, setResults]           = useState([]);
   const [logs, setLogs]                 = useState([]);
@@ -77,20 +81,8 @@ export default function App() {
       .catch(e => { if (e.name !== 'AbortError') setError('backend_down'); });
   }
 
-  function loadFromDemo() {
-    const sorted = [...demoData.attacks].sort(
-      (a, b) => (SEVERITY_ORDER[a.severity] ?? 3) - (SEVERITY_ORDER[b.severity] ?? 3)
-    );
-    setAttacks(sorted);
-    setSelected(new Set(sorted.map(a => a.id)));
-    const names = demoData.models.map(m => m.model);
-    setModels(names);
-    if (names.length > 0) setModel(names[0]);
-    setOllamaOk(true);
-  }
-
   useEffect(() => {
-    if (DEMO) { loadFromDemo(); return; }
+    if (DEMO) return;
     const controller = new AbortController();
     loadFromBackend(controller.signal);
     return () => controller.abort();
